@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "930534035315",
+    "project_id": "auto-file-classifier",
+    "storage_bucket": "auto-file-classifier.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:930534035315:android:2acf3e5a77d66d909c7f06",
+        "android_client_info": {
+          "package_name": "com.example.auto_file_classifier"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDQ3XSG5QlO139_zvx7u7dF5VetGtb-X9U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
