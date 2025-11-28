@@ -13,8 +13,9 @@ class SupabaseConfig {
   // Example: 'http://192.168.1.100:5000'
   static const String backendUrl =
       // 'http://192.168.1.15:5000'; // Dann Router IP
-      'http://10.0.0.35:5000'; // Home router IP
-  // 'http://10.88.12.56:5000'; // Phone IP
+      // 'http://10.0.0.35:5000'; // Home router IP
+      // 'http://10.88.12.56:5000'; // Phone IP
+      'http://10.243.162.56:5000'; // Val Phone IP
 
   // API Endpoints
   static const String classifyEndpoint = '/api/classify';
