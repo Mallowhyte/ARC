@@ -9,6 +9,7 @@ class AuthService {
   AuthService._internal();
 
   final SupabaseClient _supabase = Supabase.instance.client;
+  Set<String> _roles = {};
 
   /// Get current user
   User? get currentUser => _supabase.auth.currentUser;
@@ -21,6 +22,34 @@ class AuthService {
 
   /// Check if user is signed in
   bool get isSignedIn => currentUser != null;
+
+  List<String> get roles => _roles.toList(growable: false);
+  bool get isAdmin => _roles.contains('admin');
+  bool get isAuditor => _roles.contains('auditor');
+  bool get isFaculty => _roles.contains('faculty');
+  bool get canUpload => isAdmin || isFaculty;
+
+  Future<List<String>> fetchRoles() async {
+    try {
+      final uid = currentUserId;
+      if (uid == null) {
+        _roles = {};
+        return roles;
+      }
+      final data = await _supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', uid);
+      final list = (data as List)
+          .map((row) => (row as Map<String, dynamic>)['role'] as String)
+          .toList();
+      _roles = list.toSet();
+      return roles;
+    } catch (_) {
+      _roles = {};
+      return roles;
+    }
+  }
 
   /// Sign up with email and password
   Future<AuthResponse> signUp({

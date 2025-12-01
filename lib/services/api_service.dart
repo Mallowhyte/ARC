@@ -65,24 +65,20 @@ class ApiService {
     }
   }
 
-  /// Get all documents for a user from Supabase
+  /// Get all documents for a user via backend (RBAC-aware)
   Future<List<DocumentModel>> getUserDocuments(String userId) async {
     try {
-      final response = await _supabase
-          .from('documents')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', ascending: false);
-
-      if (response is! List) {
-        throw Exception('Unexpected response type from Supabase');
+      final url = '$baseUrl${SupabaseConfig.documentsEndpoint}?user_id=$userId';
+      final resp = await http.get(Uri.parse(url));
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to fetch documents: ${resp.body}');
       }
-
-      return response
-          .map((row) => DocumentModel.fromJson(row as Map<String, dynamic>))
-          .toList();
+      final data = json.decode(resp.body) as Map<String, dynamic>;
+      final docs = (data['documents'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      return docs.map((row) => DocumentModel.fromJson(row)).toList();
     } catch (e) {
-      print('Error fetching documents from Supabase: $e');
+      print('Error fetching documents from backend: $e');
       throw Exception('Error fetching documents: $e');
     }
   }
@@ -90,8 +86,10 @@ class ApiService {
   /// Get a specific document by ID
   Future<DocumentModel> getDocumentById(String documentId) async {
     try {
+      final callerId = _supabase.auth.currentUser?.id;
+      final q = callerId != null ? '?user_id=$callerId' : '';
       final response = await http.get(
-        Uri.parse('$baseUrl${SupabaseConfig.documentsEndpoint}/$documentId'),
+        Uri.parse('$baseUrl${SupabaseConfig.documentsEndpoint}/$documentId$q'),
       );
 
       if (response.statusCode == 200) {

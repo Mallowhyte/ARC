@@ -30,14 +30,50 @@ class _UploadScreenState extends State<UploadScreen> {
   String get _userId => _authService.currentUserId ?? 'anonymous';
 
   @override
+  void initState() {
+    super.initState();
+    // Fetch roles for UI gating
+    _authService.fetchRoles().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Upload Document')),
+      appBar: AppBar(
+        title: const Text('Upload Document'),
+        actions: [
+          if (_authService.roles.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 12.0),
+              child: Chip(
+                label: Text(
+                  _authService.roles.first.toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (!_authService.canUpload) ...[
+              Card(
+                color: Colors.amber[50],
+                child: const Padding(
+                  padding: EdgeInsets.all(12.0),
+                  child: Text(
+                    'Your role has read-only access. Uploading is disabled.',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             if (_isUploading) ...[
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -52,7 +88,9 @@ class _UploadScreenState extends State<UploadScreen> {
             // Hero Upload Card
             Card(
               child: InkWell(
-                onTap: _isUploading ? null : _pickFile,
+                onTap: _isUploading || !_authService.canUpload
+                    ? null
+                    : _pickFile,
                 child: Padding(
                   padding: const EdgeInsets.all(24.0),
                   child: Column(
@@ -97,7 +135,9 @@ class _UploadScreenState extends State<UploadScreen> {
             _UploadOptionButton(
               icon: Icons.camera_alt,
               label: 'Take Photo',
-              onPressed: _isUploading ? null : _pickFromCamera,
+              onPressed: _isUploading || !_authService.canUpload
+                  ? null
+                  : _pickFromCamera,
             ),
             const SizedBox(height: 12),
 
@@ -105,7 +145,9 @@ class _UploadScreenState extends State<UploadScreen> {
             _UploadOptionButton(
               icon: Icons.photo_library,
               label: 'Choose from Gallery',
-              onPressed: _isUploading ? null : _pickFromGallery,
+              onPressed: _isUploading || !_authService.canUpload
+                  ? null
+                  : _pickFromGallery,
             ),
             const SizedBox(height: 12),
 
@@ -113,7 +155,9 @@ class _UploadScreenState extends State<UploadScreen> {
             _UploadOptionButton(
               icon: Icons.folder_open,
               label: 'Browse Files',
-              onPressed: _isUploading ? null : _pickFile,
+              onPressed: _isUploading || !_authService.canUpload
+                  ? null
+                  : _pickFile,
             ),
             const SizedBox(height: 24),
 
@@ -159,7 +203,9 @@ class _UploadScreenState extends State<UploadScreen> {
 
               // Upload Button
               ElevatedButton.icon(
-                onPressed: _isUploading ? null : _uploadAndClassify,
+                onPressed: _isUploading || !_authService.canUpload
+                    ? null
+                    : _uploadAndClassify,
                 icon: _isUploading
                     ? const SizedBox(
                         width: 20,

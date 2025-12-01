@@ -8,6 +8,8 @@ import 'auth/email_verification_screen.dart';
 import 'upload_screen.dart';
 import 'documents_screen.dart';
 import 'statistics_screen.dart';
+import 'admin/role_management_screen.dart';
+import 'admin/audit_logs_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,6 +21,15 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   final _authService = AuthService();
+  Set<String> _roles = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _authService.fetchRoles().then((_) {
+      if (mounted) setState(() => _roles = _authService.roles.toSet());
+    });
+  }
 
   void _navigateToTab(int index) {
     setState(() {
@@ -191,6 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
     DashboardTab(
       onNavigateToDocuments: () => _navigateToTab(1),
       onNavigateToStatistics: () => _navigateToTab(2),
+      canUpload: _authService.canUpload,
     ),
     const DocumentsScreen(),
     const StatisticsScreen(),
@@ -202,6 +214,16 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('ARC - AI Record Classifier'),
         actions: [
+          if (_roles.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 4.0),
+              child: Chip(
+                label: Text(
+                  _roles.first.toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
           PopupMenuButton<String>(
             onSelected: (value) {
               switch (value) {
@@ -210,6 +232,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   break;
                 case 'about':
                   _showAboutDialog(context);
+                  break;
+                case 'roles':
+                  if (_authService.isAdmin) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const RoleManagementScreen(),
+                      ),
+                    );
+                  }
+                  break;
+                case 'audit_logs':
+                  if (_authService.isAdmin) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const AuditLogsScreen(),
+                      ),
+                    );
+                  }
                   break;
                 case 'logout':
                   _handleLogout();
@@ -227,6 +267,28 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
+              if (_authService.isAdmin)
+                PopupMenuItem(
+                  value: 'roles',
+                  child: Row(
+                    children: const [
+                      Icon(Icons.admin_panel_settings_outlined),
+                      SizedBox(width: 12),
+                      Text('Role Management'),
+                    ],
+                  ),
+                ),
+              if (_authService.isAdmin)
+                PopupMenuItem(
+                  value: 'audit_logs',
+                  child: Row(
+                    children: const [
+                      Icon(Icons.event_note_outlined),
+                      SizedBox(width: 12),
+                      Text('Audit Logs'),
+                    ],
+                  ),
+                ),
               PopupMenuItem(
                 value: 'about',
                 child: Row(
@@ -323,11 +385,13 @@ class _HomeScreenState extends State<HomeScreen> {
 class DashboardTab extends StatelessWidget {
   final VoidCallback onNavigateToDocuments;
   final VoidCallback onNavigateToStatistics;
+  final bool canUpload;
 
   const DashboardTab({
     super.key,
     required this.onNavigateToDocuments,
     required this.onNavigateToStatistics,
+    required this.canUpload,
   });
 
   @override
@@ -385,10 +449,20 @@ class DashboardTab extends StatelessWidget {
             description: 'Upload a new document for AI classification',
             color: Colors.blue,
             onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const UploadScreen()),
-              );
+              if (canUpload) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const UploadScreen()),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Your role has read-only access. Uploading is disabled.',
+                    ),
+                  ),
+                );
+              }
             },
           ),
           const SizedBox(height: 12),

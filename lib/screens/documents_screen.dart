@@ -25,10 +25,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String? _errorMessage;
   String _filterType = 'All';
   String _searchQuery = '';
+  Set<String> _roles = {};
 
   @override
   void initState() {
     super.initState();
+    _authService.fetchRoles().then((_) {
+      if (!mounted) return;
+      setState(() => _roles = _authService.roles.toSet());
+    });
     _loadDocuments();
   }
 
@@ -96,6 +101,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  if (_roles.isNotEmpty) ...[
+                    Chip(
+                      label: Text(
+                        _roles.first.toUpperCase(),
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   IconButton(
                     icon: const Icon(Icons.filter_list),
                     onPressed: _documents.isEmpty

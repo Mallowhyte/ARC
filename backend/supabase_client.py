@@ -7,7 +7,7 @@ import os
 import mimetypes
 from datetime import datetime
 from supabase import create_client, Client
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 class SupabaseClient:
@@ -53,44 +53,40 @@ class SupabaseClient:
                     print(f"⚠ Warning: Could not verify bucket: {error_msg}")
                     print(f"  Continuing anyway - bucket may already exist")
     
-    def upload_file(self, file_path: str, filename: str) -> str:
-        """
-        Upload file to Supabase storage
-        
-        Args:
-            file_path: Local path to file
-            filename: Name to save file as
-            
-        Returns:
-            Public URL of uploaded file
-        """
+    def upload_file(self, file_path: str, filename: str, user_id: str, department_code: Optional[str] = None) -> Tuple[str, str]:
         try:
-            # Detect MIME type automatically
             mime_type, _ = mimetypes.guess_type(file_path)
             if mime_type is None:
-                mime_type = 'application/octet-stream'  # fallback if unknown
+                mime_type = 'application/octet-stream'
 
-            # Read file
             with open(file_path, 'rb') as f:
                 file_data = f.read()
-            
-            # Generate unique filename with timestamp
+
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             unique_filename = f"{timestamp}_{filename}"
-            
-            # Upload to Supabase storage with correct content-type
-            result = self.client.storage.from_(self.bucket_name).upload(
-                unique_filename,
+            folder_prefix = (department_code or 'misc').strip()
+            storage_key = f"{folder_prefix}/{user_id}/{unique_filename}"
+
+            self.client.storage.from_(self.bucket_name).upload(
+                storage_key,
                 file_data,
                 {"content-type": mime_type}
             )
-            
-            # Get public URL
-            file_url = self.client.storage.from_(self.bucket_name).get_public_url(unique_filename)
-            
-            print(f"✅ File uploaded successfully: {unique_filename} (MIME: {mime_type})")
-            return file_url
-            
+
+            file_url = None
+            try:
+                # 7 days
+                signed = self.client.storage.from_(self.bucket_name).create_signed_url(storage_key, 60 * 60 * 24 * 7)
+                if isinstance(signed, dict) and ('signedURL' in signed or 'signed_url' in signed):
+                    file_url = signed.get('signedURL') or signed.get('signed_url')
+                elif isinstance(signed, str):
+                    file_url = signed
+            except Exception:
+                file_url = self.client.storage.from_(self.bucket_name).get_public_url(storage_key)
+
+            print(f"✅ File uploaded successfully: {storage_key} (MIME: {mime_type})")
+            return (file_url or self.client.storage.from_(self.bucket_name).get_public_url(storage_key), storage_key)
+
         except Exception as e:
             print(f"❌ Error uploading file: {str(e)}")
             raise
@@ -145,6 +141,44 @@ class SupabaseClient:
             
         except Exception as e:
             print(f"Error retrieving documents: {str(e)}")
+            return []
+
+    def get_user_roles(self, user_id: str) -> List[Dict]:
+        try:
+            result = self.client.table('user_roles').select('role, department_id').eq('user_id', user_id).execute()
+            roles = result.data if result.data else []
+            for r in roles:
+                dep_id = r.get('department_id')
+                if dep_id:
+                    try:
+                        dep = self.client.table('departments').select('id, code').eq('id', dep_id).single().execute()
+                        if dep.data:
+                            r['department_code'] = dep.data.get('code')
+                    except Exception:
+                        pass
+            return roles
+        except Exception as e:
+            print(f"Error retrieving user roles: {str(e)}")
+            return []
+
+    def get_primary_department(self, user_id: str) -> Optional[Dict]:
+        roles = self.get_user_roles(user_id)
+        for r in roles:
+            if r.get('department_id'):
+                return {'id': r.get('department_id'), 'code': r.get('department_code')}
+        return None
+
+    def get_documents_allowed(self, user_id: str, limit: int = 50) -> List[Dict]:
+        try:
+            roles = self.get_user_roles(user_id)
+            role_names = [r.get('role') for r in roles]
+            if 'admin' in role_names or 'auditor' in role_names:
+                res = self.client.table('documents').select('*').order('created_at', desc=True).limit(limit).execute()
+                return res.data if res.data else []
+            res = self.client.table('documents').select('*').eq('owner_id', user_id).order('created_at', desc=True).limit(limit).execute()
+            return res.data if res.data else []
+        except Exception as e:
+            print(f"Error retrieving allowed documents: {str(e)}")
             return []
     
     def get_document_by_id(self, document_id: str) -> Optional[Dict]:
@@ -214,12 +248,33 @@ class SupabaseClient:
             if not document:
                 return False
             
-            # Delete from storage if URL exists
-            if document.get('storage_url'):
-                # Extract filename from URL
-                filename = document['storage_url'].split('/')[-1]
+            # Delete from storage if key or URL exists
+            storage_key = document.get('storage_key')
+            if not storage_key and document.get('storage_url'):
+                url = document['storage_url']
                 try:
-                    self.client.storage.from_(self.bucket_name).remove([filename])
+                    # signed URL example: .../object/sign/documents/<key>?token=...
+                    # public URL example: .../object/public/documents/<key>
+                    parts = url.split('/object/')
+                    if len(parts) > 1:
+                        tail = parts[1]
+                        # remove 'sign/' or 'public/' prefix
+                        if tail.startswith('sign/'):
+                            tail = tail[len('sign/'):]
+                        if tail.startswith('public/'):
+                            tail = tail[len('public/'):]
+                        # remove bucket prefix
+                        if tail.startswith(f"{self.bucket_name}/"):
+                            storage_key = tail[len(f"{self.bucket_name}/"):]
+                        else:
+                            storage_key = tail
+                        # strip query
+                        storage_key = storage_key.split('?')[0]
+                except Exception:
+                    storage_key = None
+            if storage_key:
+                try:
+                    self.client.storage.from_(self.bucket_name).remove([storage_key])
                 except Exception as e:
                     print(f"Error deleting file from storage: {str(e)}")
             
@@ -243,13 +298,12 @@ class SupabaseClient:
             Statistics dictionary
         """
         try:
-            query = self.client.table('documents').select('document_type, confidence')
-            
+            documents: List[Dict] = []
             if user_id:
-                query = query.eq('user_id', user_id)
-            
-            result = query.execute()
-            documents = result.data if result.data else []
+                documents = self.get_documents_allowed(user_id, limit=1000)
+            else:
+                res = self.client.table('documents').select('document_type, confidence').execute()
+                documents = res.data if res.data else []
             
             # Calculate statistics
             total = len(documents)
@@ -261,30 +315,52 @@ class SupabaseClient:
                     'average_confidence': 0
                 }
             
-            # Count by category
-            category_counts = {}
-            total_confidence = 0
-            
+            # Group by category
+            by_category: Dict[str, int] = {}
+            total_confidence = 0.0
             for doc in documents:
                 doc_type = doc.get('document_type', 'Unknown')
-                category_counts[doc_type] = category_counts.get(doc_type, 0) + 1
-                total_confidence += doc.get('confidence', 0)
+                by_category[doc_type] = by_category.get(doc_type, 0) + 1
+                conf = doc.get('confidence') or 0
+                try:
+                    total_confidence += float(conf)
+                except Exception:
+                    pass
             
-            avg_confidence = total_confidence / total if total > 0 else 0
+            avg_conf = (total_confidence / total) if total > 0 else 0
             
             return {
                 'total_documents': total,
-                'by_category': category_counts,
-                'average_confidence': round(avg_confidence, 2)
+                'by_category': by_category,
+                'average_confidence': avg_conf
             }
-            
+        
         except Exception as e:
-            print(f"Error getting statistics: {str(e)}")
+            print(f"Error calculating statistics: {str(e)}")
             return {
                 'total_documents': 0,
                 'by_category': {},
                 'average_confidence': 0
             }
+
+    def add_audit_log(self,
+                      actor_user_id: Optional[str],
+                      action: str,
+                      resource_type: str,
+                      resource_id: Optional[str] = None,
+                      metadata: Optional[Dict] = None) -> None:
+        """Insert an audit log row. Best-effort; errors are swallowed."""
+        try:
+            payload = {
+                'actor_user_id': actor_user_id,
+                'action': action,
+                'resource_type': resource_type,
+                'resource_id': resource_id,
+                'metadata': metadata or {},
+            }
+            self.client.table('audit_logs').insert(payload).execute()
+        except Exception as e:
+            print(f"Audit log insert failed: {e}")
     
     def get_next_document_number(self, prefix: str, department_code: str, year: int) -> str:
         """Generate the next ISO document number via Postgres function get_next_document_number.

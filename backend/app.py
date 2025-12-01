@@ -110,6 +110,15 @@ def classify_document():
         
         # Get user_id from request (optional)
         user_id = request.form.get('user_id', 'anonymous')
+        # Fetch user's primary department for RBAC scoping
+        dept = supabase_client.get_primary_department(user_id)
+        dept_id = dept.get('id') if dept else None
+        dept_code = dept.get('code') if dept else None
+        # Role guard: only Admin or Faculty can upload
+        roles = supabase_client.get_user_roles(user_id)
+        role_names = [r.get('role') for r in roles]
+        if 'admin' not in role_names and 'faculty' not in role_names:
+            return jsonify({'error': 'Forbidden: your role cannot upload'}), 403
         
         # Save file temporarily
         filename = secure_filename(file.filename)
@@ -153,21 +162,40 @@ def classify_document():
         
         # Step 3: Upload file to Supabase Storage
         print(f"Uploading to Supabase storage...")
-        storage_url = supabase_client.upload_file(temp_path, filename)
+        storage_url, storage_key = supabase_client.upload_file(
+            temp_path,
+            filename,
+            user_id,
+            dept_code,
+        )
         print(f"File uploaded successfully")
         
         # Step 4: Save metadata to Supabase database
         record = {
             'user_id': user_id,
+            'owner_id': user_id,
+            'department_id': dept_id,
             'filename': filename,
             'document_type': classification_result['document_type'],
             'confidence': classification_result['confidence'],
             'extracted_text': extracted_text[:500],  # Store first 500 chars
             'storage_url': storage_url,
-            'status': 'classified'
+            'status': 'classified',
+            'storage_key': storage_key,
         }
         
         db_result = supabase_client.save_document_record(record)
+        # Audit: upload
+        try:
+            supabase_client.add_audit_log(
+                actor_user_id=user_id,
+                action='upload',
+                resource_type='document',
+                resource_id=db_result.get('id'),
+                metadata={'filename': filename, 'document_type': classification_result.get('document_type')}
+            )
+        except Exception:
+            pass
         
         # Clean up temp file
         os.remove(temp_path)
@@ -202,8 +230,21 @@ def classify_document():
 def get_documents():
     """Get all documents for a user"""
     try:
-        user_id = request.args.get('user_id', 'anonymous')
-        documents = supabase_client.get_user_documents(user_id)
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'user_id is required'}), 400
+        documents = supabase_client.get_documents_allowed(user_id)
+        # Audit: list
+        try:
+            supabase_client.add_audit_log(
+                actor_user_id=user_id,
+                action='list',
+                resource_type='document',
+                resource_id=None,
+                metadata={'count': len(documents)}
+            )
+        except Exception:
+            pass
         
         return jsonify({
             'success': True,
@@ -222,11 +263,40 @@ def get_documents():
 def get_document_by_id(document_id):
     """Get a specific document by ID"""
     try:
+        caller_id = request.args.get('user_id')
+        if not caller_id:
+            return jsonify({'error': 'user_id is required'}), 400
+
         document = supabase_client.get_document_by_id(document_id)
         
         if not document:
             return jsonify({'error': 'Document not found'}), 404
-        
+
+        # RBAC check (Admin, Auditor, Faculty)
+        roles = supabase_client.get_user_roles(caller_id)
+        role_names = [r.get('role') for r in roles]
+        allowed = False
+        if 'admin' in role_names or 'auditor' in role_names:
+            allowed = True
+        else:
+            # Faculty can access only their own documents
+            allowed = document.get('owner_id') == caller_id
+
+        if not allowed:
+            return jsonify({'error': 'Forbidden'}), 403
+
+        # Audit: view document
+        try:
+            supabase_client.add_audit_log(
+                actor_user_id=caller_id,
+                action='view',
+                resource_type='document',
+                resource_id=document_id,
+                metadata={'owner_id': document.get('owner_id')}
+            )
+        except Exception:
+            pass
+
         return jsonify({
             'success': True,
             'document': document
@@ -237,6 +307,51 @@ def get_document_by_id(document_id):
             'error': 'Failed to retrieve document',
             'details': str(e)
         }), 500
+
+
+@app.route('/api/documents/<document_id>', methods=['DELETE'])
+def delete_document(document_id):
+    """Delete a specific document by ID with RBAC checks"""
+    try:
+        caller_id = request.args.get('user_id')
+        if not caller_id:
+            return jsonify({'error': 'user_id is required'}), 400
+
+        # Fetch document
+        document = supabase_client.get_document_by_id(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+
+        # RBAC: Admin can delete any; Faculty can delete only their own; Auditor cannot delete
+        roles = supabase_client.get_user_roles(caller_id)
+        role_names = [r.get('role') for r in roles]
+        is_admin = 'admin' in role_names
+        is_auditor = 'auditor' in role_names
+        is_owner = document.get('owner_id') == caller_id
+
+        if is_auditor or (not is_admin and not is_owner):
+            return jsonify({'error': 'Forbidden'}), 403
+
+        ok = supabase_client.delete_document(document_id)
+        if not ok:
+            return jsonify({'error': 'Failed to delete document'}), 500
+
+        # Audit: delete
+        try:
+            supabase_client.add_audit_log(
+                actor_user_id=caller_id,
+                action='delete',
+                resource_type='document',
+                resource_id=document_id,
+                metadata={'owner_id': document.get('owner_id')}
+            )
+        except Exception:
+            pass
+
+        return jsonify({'success': True}), 200
+
+    except Exception as e:
+        return jsonify({'error': 'Failed to delete document', 'details': str(e)}), 500
 
 
 @app.route('/api/next-document-number', methods=['GET'])
@@ -273,6 +388,17 @@ def get_statistics():
     try:
         user_id = request.args.get('user_id')
         stats = supabase_client.get_statistics(user_id)
+        # Audit: stats_view
+        try:
+            supabase_client.add_audit_log(
+                actor_user_id=user_id,
+                action='stats_view',
+                resource_type='system',
+                resource_id=None,
+                metadata={'total_documents': stats.get('total_documents', 0)}
+            )
+        except Exception:
+            pass
         
         return jsonify({
             'success': True,

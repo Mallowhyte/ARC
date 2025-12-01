@@ -22,10 +22,15 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   Map<String, dynamic>? _statistics;
+  Set<String> _roles = {};
 
   @override
   void initState() {
     super.initState();
+    _authService.fetchRoles().then((_) {
+      if (!mounted) return;
+      setState(() => _roles = _authService.roles.toSet());
+    });
     _loadStatistics();
   }
 
@@ -54,6 +59,21 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Statistics'),
+        actions: [
+          if (_roles.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 12.0),
+              child: Chip(
+                label: Text(
+                  _roles.first.toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _loadStatistics,
         child: _buildContent(),
