@@ -226,6 +226,18 @@ def classify_document():
         }), 500
 
 
+@app.route('/api/roles', methods=['GET'])
+def get_roles():
+    """Return roles for a user via service-role backend to avoid client RLS issues."""
+    try:
+      user_id = request.args.get('user_id')
+      if not user_id:
+          return jsonify({'error': 'user_id is required'}), 400
+      roles = supabase_client.get_user_roles(user_id)
+      return jsonify({'success': True, 'roles': roles}), 200
+    except Exception as e:
+      return jsonify({'error': 'Failed to get roles', 'details': str(e)}), 500
+
 @app.route('/api/documents', methods=['GET'])
 def get_documents():
     """Get all documents for a user"""
@@ -354,6 +366,54 @@ def delete_document(document_id):
         return jsonify({'error': 'Failed to delete document', 'details': str(e)}), 500
 
 
+@app.route('/api/documents/<document_id>/download', methods=['GET'])
+def download_document(document_id):
+    """Return a fresh signed download URL for a document with RBAC checks."""
+    try:
+        caller_id = request.args.get('user_id')
+        if not caller_id:
+            return jsonify({'error': 'user_id is required'}), 400
+
+        # Fetch document
+        document = supabase_client.get_document_by_id(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+
+        # RBAC: Admin/Auditor can download any; Faculty can download only own
+        roles = supabase_client.get_user_roles(caller_id)
+        role_names = [r.get('role') for r in roles]
+        is_admin = 'admin' in role_names
+        is_auditor = 'auditor' in role_names
+        is_owner = document.get('owner_id') == caller_id
+
+        if not (is_admin or is_auditor or is_owner):
+            return jsonify({'error': 'Forbidden'}), 403
+
+        signed_url = supabase_client.get_signed_download_url(
+            storage_key=document.get('storage_key'),
+            storage_url=document.get('storage_url'),
+            expires_seconds=60 * 10,
+        )
+        if not signed_url:
+            return jsonify({'error': 'Failed to create download URL'}), 500
+
+        # Audit: treat as view with sub_action=download
+        try:
+            supabase_client.add_audit_log(
+                actor_user_id=caller_id,
+                action='view',
+                resource_type='document',
+                resource_id=document_id,
+                metadata={'sub_action': 'download'}
+            )
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'url': signed_url}), 200
+
+    except Exception as e:
+        return jsonify({'error': 'Failed to prepare download', 'details': str(e)}), 500
+
 @app.route('/api/next-document-number', methods=['GET'])
 def next_document_number():
     """Return the next ISO document number.
@@ -410,6 +470,23 @@ def get_statistics():
             'error': 'Failed to retrieve statistics',
             'details': str(e)
         }), 500
+
+
+@app.route('/api/users/display', methods=['GET'])
+def users_display():
+    """Return display info (full_name, email) for comma-separated ids query param.
+
+    Example: /api/users/display?ids=<uuid1>,<uuid2>
+    """
+    try:
+        ids_param = request.args.get('ids', '')
+        ids = [s.strip() for s in ids_param.split(',') if s.strip()]
+        if not ids:
+            return jsonify({'error': 'ids is required'}), 400
+        mapping = supabase_client.get_user_displays(ids)
+        return jsonify({'success': True, 'users': mapping}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to resolve user displays', 'details': str(e)}), 500
 
 
 if __name__ == '__main__':

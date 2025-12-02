@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../services/api_service.dart';
 
 class AuditLogsScreen extends StatefulWidget {
   const AuditLogsScreen({super.key});
@@ -10,10 +11,12 @@ class AuditLogsScreen extends StatefulWidget {
 
 class _AuditLogsScreenState extends State<AuditLogsScreen> {
   final _supabase = Supabase.instance.client;
+  final _api = ApiService();
 
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _rows = [];
+  final Map<String, Map<String, dynamic>> _profiles = {};
 
   String? _actionFilter; // upload, view, update, delete, list, stats_view
   String? _actorSearch; // actor_user_id partial
@@ -45,12 +48,34 @@ class _AuditLogsScreenState extends State<AuditLogsScreen> {
 
       final data = await q.order('created_at', ascending: false).limit(200);
       _rows = (data as List).cast<Map<String, dynamic>>();
+
+      // Load actor profiles for display names/emails
+      await _loadActorProfiles();
       setState(() => _loading = false);
     } catch (e) {
       setState(() {
         _loading = false;
         _error = e.toString();
       });
+    }
+  }
+
+  Future<void> _loadActorProfiles() async {
+    try {
+      final ids = _rows
+          .map((r) => (r['actor_user_id'] ?? '') as String)
+          .where((s) => s.isNotEmpty)
+          .toSet()
+          .toList();
+      if (ids.isEmpty) return;
+      final mapping = await _api.getUserDisplays(ids);
+      mapping.forEach((key, value) {
+        if (value is Map) {
+          _profiles[key] = Map<String, dynamic>.from(value as Map);
+        }
+      });
+    } catch (_) {
+      // ignore, fall back to UID display
     }
   }
 
@@ -157,6 +182,14 @@ class _AuditLogsScreenState extends State<AuditLogsScreen> {
         final action = (r['action'] ?? '') as String;
         final resourceType = (r['resource_type'] ?? '') as String;
         final actor = (r['actor_user_id'] ?? '') as String;
+        final prof = _profiles[actor];
+        final fullName = (prof?['full_name'] as String?)?.trim();
+        final email = (prof?['email'] as String?)?.trim();
+        final actorDisplay = (fullName != null && fullName.isNotEmpty)
+            ? (email != null && email.isNotEmpty
+                  ? '$fullName • $email'
+                  : fullName)
+            : (email != null && email.isNotEmpty ? email : actor);
         final createdAt = r['created_at']?.toString() ?? '';
         final resourceId = (r['resource_id'] ?? '') as String;
 
@@ -164,7 +197,7 @@ class _AuditLogsScreenState extends State<AuditLogsScreen> {
           dense: true,
           leading: _actionIcon(action),
           title: Text('$action • $resourceType'),
-          subtitle: Text('Actor: $actor\nTime: $createdAt'),
+          subtitle: Text('Actor: $actorDisplay\nTime: $createdAt'),
           trailing: resourceId.isNotEmpty
               ? Text(resourceId, style: const TextStyle(fontSize: 12))
               : null,

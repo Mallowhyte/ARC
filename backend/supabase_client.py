@@ -8,6 +8,7 @@ import mimetypes
 from datetime import datetime
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
+import requests
 
 
 class SupabaseClient:
@@ -147,6 +148,14 @@ class SupabaseClient:
         try:
             result = self.client.table('user_roles').select('role, department_id').eq('user_id', user_id).execute()
             roles = result.data if result.data else []
+            # Fallback via RPC if RLS blocks or no rows visible
+            if not roles:
+                try:
+                    rpc = self.client.rpc('get_user_roles_for', {'p_user_id': user_id}).execute()
+                    if rpc.data:
+                        roles = rpc.data
+                except Exception:
+                    pass
             for r in roles:
                 dep_id = r.get('department_id')
                 if dep_id:
@@ -158,8 +167,13 @@ class SupabaseClient:
                         pass
             return roles
         except Exception as e:
-            print(f"Error retrieving user roles: {str(e)}")
-            return []
+            # Try RPC fallback if direct select failed
+            try:
+                rpc = self.client.rpc('get_user_roles_for', {'p_user_id': user_id}).execute()
+                return rpc.data if rpc.data else []
+            except Exception:
+                print(f"Error retrieving user roles: {str(e)}")
+                return []
 
     def get_primary_department(self, user_id: str) -> Optional[Dict]:
         roles = self.get_user_roles(user_id)
@@ -286,6 +300,45 @@ class SupabaseClient:
         except Exception as e:
             print(f"Error deleting document: {str(e)}")
             return False
+
+    def _extract_storage_key(self, storage_url: Optional[str]) -> Optional[str]:
+        """Extract storage key from a public or signed storage URL."""
+        if not storage_url:
+            return None
+        try:
+            parts = storage_url.split('/object/')
+            if len(parts) <= 1:
+                return None
+            tail = parts[1]
+            if tail.startswith('sign/'):
+                tail = tail[len('sign/'):]
+            if tail.startswith('public/'):
+                tail = tail[len('public/'):]
+            if tail.startswith(f"{self.bucket_name}/"):
+                tail = tail[len(f"{self.bucket_name}/"):]
+            tail = tail.split('?')[0]
+            return tail
+        except Exception:
+            return None
+
+    def get_signed_download_url(self, storage_key: Optional[str] = None, storage_url: Optional[str] = None, expires_seconds: int = 60 * 5) -> Optional[str]:
+        """Return a fresh signed URL for a storage object, falling back to public URL."""
+        try:
+            key = storage_key or self._extract_storage_key(storage_url)
+            if not key:
+                return storage_url
+            try:
+                signed = self.client.storage.from_(self.bucket_name).create_signed_url(key, expires_seconds)
+                if isinstance(signed, dict):
+                    return signed.get('signedURL') or signed.get('signed_url')
+                if isinstance(signed, str):
+                    return signed
+            except Exception:
+                pass
+            return self.client.storage.from_(self.bucket_name).get_public_url(key)
+        except Exception as e:
+            print(f"Error creating signed download URL: {str(e)}")
+            return storage_url
     
     def get_statistics(self, user_id: Optional[str] = None) -> Dict:
         """
@@ -361,6 +414,81 @@ class SupabaseClient:
             self.client.table('audit_logs').insert(payload).execute()
         except Exception as e:
             print(f"Audit log insert failed: {e}")
+    
+    def _auth_admin_get_user(self, user_id: str) -> Optional[Dict]:
+        """Fetch a user from Supabase Auth Admin REST API using the service key."""
+        try:
+            url = f"{self.supabase_url}/auth/v1/admin/users/{user_id}"
+            headers = {
+                'apiKey': self.supabase_key,
+                'Authorization': f"Bearer {self.supabase_key}",
+            }
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            return data
+        except Exception as e:
+            print(f"Auth admin get user failed: {e}")
+            return None
+
+    def get_user_displays(self, ids: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+        """Return mapping of user_id -> {full_name, email}.
+
+        Tries public.users first, then falls back to Auth Admin API for missing IDs.
+        """
+        result: Dict[str, Dict[str, Optional[str]]] = {}
+        if not ids:
+            return result
+        try:
+            # Prefer view over auth.users to avoid Admin API
+            try:
+                res_v = self.client.table('auth_users_view').select('id, full_name, email').in_('id', ids).execute()
+                rows_v = res_v.data or []
+                for row in rows_v:
+                    uid = row.get('id')
+                    if uid:
+                        result[uid] = {
+                            'full_name': row.get('full_name'),
+                            'email': row.get('email'),
+                        }
+            except Exception:
+                pass
+
+            # Fallback to project table 'users' if present
+            try:
+                missing_pre = [i for i in ids if i not in result]
+                if missing_pre:
+                    res = self.client.table('users').select('id, full_name, email').in_('id', missing_pre).execute()
+                    rows = res.data or []
+                    for row in rows:
+                        uid = row.get('id')
+                        if uid and uid not in result:
+                            result[uid] = {
+                                'full_name': row.get('full_name'),
+                                'email': row.get('email'),
+                            }
+            except Exception:
+                pass
+
+            # Fallback to Auth Admin for missing
+            missing = [i for i in ids if i not in result]
+            for uid in missing:
+                data = self._auth_admin_get_user(uid)
+                if not data:
+                    continue
+                full_name = None
+                # Supabase returns user_metadata or raw_user_meta_data depending on SDK
+                meta = data.get('user_metadata') or data.get('raw_user_meta_data') or {}
+                if isinstance(meta, dict):
+                    full_name = meta.get('full_name') or meta.get('name')
+                result[uid] = {
+                    'full_name': full_name,
+                    'email': data.get('email'),
+                }
+        except Exception as e:
+            print(f"Error building user display map: {e}")
+        return result
     
     def get_next_document_number(self, prefix: str, department_code: str, year: int) -> str:
         """Generate the next ISO document number via Postgres function get_next_document_number.

@@ -61,7 +61,19 @@ class _UploadScreenState extends State<UploadScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (!_authService.canUpload) ...[
+            if (!_authService.rolesLoaded) ...[
+              Card(
+                color: Colors.blue[50],
+                child: const Padding(
+                  padding: EdgeInsets.all(12.0),
+                  child: Text(
+                    'Loading permissions…',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ] else if (!_authService.canUpload) ...[
               Card(
                 color: Colors.amber[50],
                 child: const Padding(
@@ -88,9 +100,11 @@ class _UploadScreenState extends State<UploadScreen> {
             // Hero Upload Card
             Card(
               child: InkWell(
-                onTap: _isUploading || !_authService.canUpload
+                onTap: _isUploading || !_authService.rolesLoaded
                     ? null
-                    : _pickFile,
+                    : _authService.canUpload
+                    ? _pickFile
+                    : null,
                 child: Padding(
                   padding: const EdgeInsets.all(24.0),
                   child: Column(
@@ -135,7 +149,10 @@ class _UploadScreenState extends State<UploadScreen> {
             _UploadOptionButton(
               icon: Icons.camera_alt,
               label: 'Take Photo',
-              onPressed: _isUploading || !_authService.canUpload
+              onPressed:
+                  _isUploading ||
+                      !_authService.rolesLoaded ||
+                      !_authService.canUpload
                   ? null
                   : _pickFromCamera,
             ),
@@ -145,7 +162,10 @@ class _UploadScreenState extends State<UploadScreen> {
             _UploadOptionButton(
               icon: Icons.photo_library,
               label: 'Choose from Gallery',
-              onPressed: _isUploading || !_authService.canUpload
+              onPressed:
+                  _isUploading ||
+                      !_authService.rolesLoaded ||
+                      !_authService.canUpload
                   ? null
                   : _pickFromGallery,
             ),
@@ -155,7 +175,10 @@ class _UploadScreenState extends State<UploadScreen> {
             _UploadOptionButton(
               icon: Icons.folder_open,
               label: 'Browse Files',
-              onPressed: _isUploading || !_authService.canUpload
+              onPressed:
+                  _isUploading ||
+                      !_authService.rolesLoaded ||
+                      !_authService.canUpload
                   ? null
                   : _pickFile,
             ),
@@ -203,7 +226,10 @@ class _UploadScreenState extends State<UploadScreen> {
 
               // Upload Button
               ElevatedButton.icon(
-                onPressed: _isUploading || !_authService.canUpload
+                onPressed:
+                    _isUploading ||
+                        !_authService.rolesLoaded ||
+                        !_authService.canUpload
                     ? null
                     : _uploadAndClassify,
                 icon: _isUploading

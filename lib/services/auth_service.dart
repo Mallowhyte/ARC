@@ -2,6 +2,9 @@
 /// Handles user authentication with Supabase Auth
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../config/supabase_config.dart';
 
 class AuthService {
   static final AuthService _instance = AuthService._internal();
@@ -10,6 +13,7 @@ class AuthService {
 
   final SupabaseClient _supabase = Supabase.instance.client;
   Set<String> _roles = {};
+  bool _rolesLoaded = false;
 
   /// Get current user
   User? get currentUser => _supabase.auth.currentUser;
@@ -28,25 +32,54 @@ class AuthService {
   bool get isAuditor => _roles.contains('auditor');
   bool get isFaculty => _roles.contains('faculty');
   bool get canUpload => isAdmin || isFaculty;
+  bool get rolesLoaded => _rolesLoaded;
 
   Future<List<String>> fetchRoles() async {
     try {
+      _rolesLoaded = false;
       final uid = currentUserId;
       if (uid == null) {
         _roles = {};
+        _rolesLoaded = true;
         return roles;
       }
-      final data = await _supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', uid);
-      final list = (data as List)
-          .map((row) => (row as Map<String, dynamic>)['role'] as String)
-          .toList();
-      _roles = list.toSet();
+      // Prefer backend roles (service-role, no RLS surprises)
+      List<String> list = [];
+      try {
+        final uri = Uri.parse(
+          '${SupabaseConfig.backendUrl}/api/roles?user_id=$uid',
+        );
+        final resp = await http.get(uri).timeout(const Duration(seconds: 8));
+        if (resp.statusCode == 200) {
+          final body = json.decode(resp.body) as Map<String, dynamic>;
+          final rows = (body['roles'] as List?) ?? [];
+          list = rows
+              .map((e) => (e as Map<String, dynamic>)['role'] as String)
+              .toList();
+        }
+      } catch (_) {}
+
+      // Fallback to direct Supabase if backend failed
+      if (list.isEmpty) {
+        try {
+          final data = await _supabase
+              .from('user_roles')
+              .select('role')
+              .eq('user_id', uid);
+          list = (data as List)
+              .map((row) => (row as Map<String, dynamic>)['role'] as String)
+              .toList();
+        } catch (_) {}
+      }
+      final normalized = list
+          .map((e) => e.toString().trim().toLowerCase())
+          .toSet();
+      _roles = normalized;
+      _rolesLoaded = true;
       return roles;
     } catch (_) {
       _roles = {};
+      _rolesLoaded = true;
       return roles;
     }
   }

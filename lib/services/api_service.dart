@@ -65,6 +65,62 @@ class ApiService {
     }
   }
 
+  /// Resolve user display info (full_name, email) for a list of IDs via backend
+  Future<Map<String, dynamic>> getUserDisplays(List<String> ids) async {
+    if (ids.isEmpty) return {};
+    try {
+      final idsParam = ids.join(',');
+      final uri = Uri.parse('$baseUrl/api/users/display?ids=$idsParam');
+      final resp = await http.get(uri);
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to resolve user displays: ${resp.body}');
+      }
+      final data = json.decode(resp.body) as Map<String, dynamic>;
+      return Map<String, dynamic>.from(data['users'] as Map);
+    } catch (e) {
+      // Best-effort: return empty map on failure
+      return {};
+    }
+  }
+
+  /// Get a signed download URL for a document
+  Future<String> getDownloadUrl({
+    required String documentId,
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '$baseUrl${SupabaseConfig.documentsEndpoint}/$documentId/download?user_id=$userId',
+      );
+      final resp = await http.get(uri);
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to get download URL: ${resp.body}');
+      }
+      final map = json.decode(resp.body) as Map<String, dynamic>;
+      return map['url'] as String;
+    } catch (e) {
+      throw Exception('Error preparing download: $e');
+    }
+  }
+
+  /// Delete a specific document (Admin can delete any; Faculty only own; Auditor cannot)
+  Future<void> deleteDocument({
+    required String documentId,
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '$baseUrl${SupabaseConfig.documentsEndpoint}/$documentId?user_id=$userId',
+      );
+      final resp = await http.delete(uri);
+      if (resp.statusCode != 200) {
+        throw Exception('Failed to delete document: ${resp.body}');
+      }
+    } catch (e) {
+      throw Exception('Error deleting document: $e');
+    }
+  }
+
   /// Get all documents for a user via backend (RBAC-aware)
   Future<List<DocumentModel>> getUserDocuments(String userId) async {
     try {

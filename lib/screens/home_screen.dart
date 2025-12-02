@@ -203,6 +203,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onNavigateToDocuments: () => _navigateToTab(1),
       onNavigateToStatistics: () => _navigateToTab(2),
       canUpload: _authService.canUpload,
+      rolesLoaded: _authService.rolesLoaded,
     ),
     const DocumentsScreen(),
     const StatisticsScreen(),
@@ -386,12 +387,14 @@ class DashboardTab extends StatelessWidget {
   final VoidCallback onNavigateToDocuments;
   final VoidCallback onNavigateToStatistics;
   final bool canUpload;
+  final bool rolesLoaded;
 
   const DashboardTab({
     super.key,
     required this.onNavigateToDocuments,
     required this.onNavigateToStatistics,
     required this.canUpload,
+    required this.rolesLoaded,
   });
 
   @override
@@ -449,6 +452,12 @@ class DashboardTab extends StatelessWidget {
             description: 'Upload a new document for AI classification',
             color: Colors.blue,
             onTap: () {
+              if (!rolesLoaded) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Loading permissions…')),
+                );
+                return;
+              }
               if (canUpload) {
                 Navigator.push(
                   context,

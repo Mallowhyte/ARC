@@ -1,11 +1,15 @@
 /// Documents Screen
 /// Displays list of all uploaded and classified documents
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../models/document_model.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({super.key});
@@ -26,6 +30,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String _filterType = 'All';
   String _searchQuery = '';
   Set<String> _roles = {};
+  final Map<String, Map<String, dynamic>> _userDisplayCache = {};
 
   @override
   void initState() {
@@ -35,6 +40,131 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       setState(() => _roles = _authService.roles.toSet());
     });
     _loadDocuments();
+  }
+
+  Future<void> _downloadDoc(DocumentModel doc) async {
+    try {
+      final url = await _apiService.getDownloadUrl(
+        documentId: doc.id,
+        userId: _userId,
+      );
+      if (!mounted) return;
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to open: $e')));
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchUserProfile(String id) async {
+    // Serve immediately from cache if available
+    final cached = _userDisplayCache[id];
+    if (cached != null) return cached;
+    try {
+      // Prefer backend resolver (uses service role, falls back to Auth Admin)
+      final map = await _apiService.getUserDisplays([id]);
+      final info = map[id];
+      if (info is Map) {
+        final normalized = Map<String, dynamic>.from(info);
+        _userDisplayCache[id] = normalized;
+        return normalized;
+      }
+    } catch (_) {}
+    // Fallback to direct Supabase table if accessible
+    try {
+      final row = await Supabase.instance.client
+          .from('users')
+          .select('email, full_name')
+          .eq('id', id)
+          .maybeSingle();
+      if (row == null) return null;
+      final normalized = Map<String, dynamic>.from(row);
+      _userDisplayCache[id] = normalized;
+      return normalized;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _isImageUrl(String url) {
+    final path = url.split('?').first.toLowerCase();
+    return path.endsWith('.png') ||
+        path.endsWith('.jpg') ||
+        path.endsWith('.jpeg') ||
+        path.endsWith('.gif') ||
+        path.endsWith('.webp');
+  }
+
+  Widget _inlinePreview(String url) {
+    if (_isImageUrl(url)) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: InteractiveViewer(
+          child: Image.network(url, fit: BoxFit.contain),
+        ),
+      );
+    }
+    // Use Google viewer for PDFs/Office docs in a WebView
+    final gview =
+        'https://docs.google.com/gview?embedded=1&url=${Uri.encodeComponent(url)}';
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..loadRequest(Uri.parse(gview));
+    return SizedBox(height: 420, child: WebViewWidget(controller: controller));
+  }
+
+  Future<void> _deleteDoc(DocumentModel doc) async {
+    final isAdmin = _roles.contains('admin');
+    final isAuditor = _roles.contains('auditor');
+    final isOwner = doc.userId == _userId;
+    final canDelete = isAdmin || (!isAuditor && isOwner);
+    if (!canDelete) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You do not have permission to delete this document.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Document'),
+        content: const Text(
+          'Are you sure you want to delete this document? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _apiService.deleteDocument(documentId: doc.id, userId: _userId);
+      if (!mounted) return;
+      setState(() {
+        _documents.removeWhere((d) => d.id == doc.id);
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Document deleted')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+    }
   }
 
   Future<void> _loadDocuments() async {
@@ -50,12 +180,36 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         _documents = documents;
         _isLoading = false;
       });
+      // Prefetch uploader display info to avoid delay in details view (best-effort)
+      _prefetchDisplays();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _prefetchDisplays() async {
+    try {
+      final ids = _documents
+          .map((d) => d.userId)
+          .where((s) => s.isNotEmpty)
+          .toSet()
+          .toList();
+      if (ids.isEmpty) return;
+      final mapping = await _apiService.getUserDisplays(ids);
+      if (!mounted) return;
+      setState(() {
+        mapping.forEach((key, value) {
+          if (value is Map) {
+            _userDisplayCache[key] = Map<String, dynamic>.from(value);
+          }
+        });
+      });
+    } catch (_) {
+      // best-effort; ignore failures
     }
   }
 
@@ -302,17 +456,206 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       padding: const EdgeInsets.all(16.0),
       itemCount: filteredDocs.length,
       itemBuilder: (context, index) {
-        return _DocumentCard(document: filteredDocs[index]);
+        final doc = filteredDocs[index];
+        final isAdmin = _roles.contains('admin');
+        final isAuditor = _roles.contains('auditor');
+        final isOwner = doc.userId == _userId;
+        final canDelete = isAdmin || (!isAuditor && isOwner);
+        final canDownload = isAdmin || isAuditor || isOwner;
+        return _DocumentCard(
+          document: doc,
+          canDelete: canDelete,
+          canDownload: canDownload,
+          onDelete: () => _deleteDoc(doc),
+          onDownload: () => _downloadDoc(doc),
+          onOpen: () => _openDetails(doc),
+        );
       },
+    );
+  }
+
+  void _openDetails(DocumentModel doc) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) {
+          return SingleChildScrollView(
+            controller: scrollController,
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Document Details',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const Divider(height: 32),
+                Builder(
+                  builder: (context) {
+                    final cached = _userDisplayCache[doc.userId];
+                    final future = cached != null
+                        ? Future.value(cached)
+                        : _fetchUserProfile(doc.userId);
+                    return FutureBuilder<Map<String, dynamic>?>(
+                      future: future,
+                      builder: (context, snap) {
+                        if (cached == null &&
+                            snap.connectionState == ConnectionState.waiting) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              _DetailRow(
+                                label: 'Uploaded by',
+                                value: 'Resolving…',
+                              ),
+                            ],
+                          );
+                        }
+                        final data = snap.data ?? cached;
+                        final fullName = data?['full_name']?.trim();
+                        final email = data?['email']?.trim();
+                        final displayName =
+                            (fullName != null && fullName.isNotEmpty)
+                            ? (email != null && email.isNotEmpty
+                                  ? '$fullName • $email'
+                                  : fullName)
+                            : (email != null && email.isNotEmpty
+                                  ? email
+                                  : doc.userId);
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _DetailRow(
+                              label: 'Uploaded by',
+                              value: displayName,
+                            ),
+                            if (email != null && email.isNotEmpty)
+                              _DetailRow(label: 'Email', value: email),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+                _DetailRow(label: 'Filename', value: doc.filename),
+                _DetailRow(label: 'Document Type', value: doc.documentType),
+                _DetailRow(
+                  label: 'Confidence',
+                  value: doc.confidencePercentage,
+                ),
+                _DetailRow(
+                  label: 'Upload Date',
+                  value: DateFormat(
+                    'MMMM dd, yyyy HH:mm',
+                  ).format(doc.createdAt),
+                ),
+                _DetailRow(label: 'Status', value: doc.status),
+                const SizedBox(height: 16),
+                const Text(
+                  'Preview',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                FutureBuilder<String>(
+                  future: _apiService.getDownloadUrl(
+                    documentId: doc.id,
+                    userId: _userId,
+                  ),
+                  builder: (context, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const SizedBox(
+                        height: 160,
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    if (snap.hasError || !snap.hasData) {
+                      return const Text('Unable to load preview');
+                    }
+                    return _inlinePreview(snap.data!);
+                  },
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final url = await _apiService.getDownloadUrl(
+                        documentId: doc.id,
+                        userId: _userId,
+                      );
+                      await launchUrl(
+                        Uri.parse(url),
+                        mode: LaunchMode.externalApplication,
+                      );
+                    },
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Open'),
+                  ),
+                ),
+                if (doc.keywords != null && doc.keywords!.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Keywords:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: doc.keywords!
+                        .map(
+                          (keyword) => Chip(
+                            label: Text(keyword),
+                            backgroundColor: Colors.blue[50],
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
 
-/// Document Card Widget
 class _DocumentCard extends StatelessWidget {
   final DocumentModel document;
+  final bool canDelete;
+  final VoidCallback? onDelete;
+  final bool canDownload;
+  final VoidCallback? onDownload;
+  final VoidCallback? onOpen;
 
-  const _DocumentCard({required this.document});
+  const _DocumentCard({
+    required this.document,
+    this.canDelete = false,
+    this.onDelete,
+    this.canDownload = true,
+    this.onDownload,
+    this.onOpen,
+  });
 
   // Get status color based on document status
   Color _getStatusColor(String status) {
@@ -346,7 +689,7 @@ class _DocumentCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 12.0),
       child: InkWell(
-        onTap: () => _showDocumentDetails(context),
+        onTap: onOpen,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(12.0),
@@ -430,7 +773,31 @@ class _DocumentCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  _ConfidenceBadge(confidence: document.confidence),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ConfidenceBadge(confidence: document.confidence),
+                      if (canDownload) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.download_outlined),
+                          tooltip: 'Download',
+                          onPressed: onDownload,
+                        ),
+                      ],
+                      if (canDelete) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.red,
+                          ),
+                          tooltip: 'Delete',
+                          onPressed: onDelete,
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -490,89 +857,10 @@ class _DocumentCard extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  void _showDocumentDetails(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) {
-          return SingleChildScrollView(
-            controller: scrollController,
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Document Details',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const Divider(height: 32),
-                _DetailRow(label: 'Filename', value: document.filename),
-                _DetailRow(
-                  label: 'Document Type',
-                  value: document.documentType,
-                ),
-                _DetailRow(
-                  label: 'Confidence',
-                  value: document.confidencePercentage,
-                ),
-                _DetailRow(
-                  label: 'Upload Date',
-                  value: DateFormat(
-                    'MMMM dd, yyyy HH:mm',
-                  ).format(document.createdAt),
-                ),
-                _DetailRow(label: 'Status', value: document.status),
-                if (document.keywords != null &&
-                    document.keywords!.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Keywords:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: document.keywords!
-                        .map(
-                          (keyword) => Chip(
-                            label: Text(keyword),
-                            backgroundColor: Colors.blue[50],
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ],
-              ],
-            ),
-          );
-        },
       ),
     );
   }
