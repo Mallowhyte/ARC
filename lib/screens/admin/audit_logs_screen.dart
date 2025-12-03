@@ -193,14 +193,22 @@ class _AuditLogsScreenState extends State<AuditLogsScreen> {
         final createdAt = r['created_at']?.toString() ?? '';
         final resourceId = (r['resource_id'] ?? '') as String;
 
+        final hasDoc = resourceId.isNotEmpty;
+        final subtitleText = hasDoc
+            ? 'Actor: $actorDisplay\nDoc: $resourceId\nTime: $createdAt'
+            : 'Actor: $actorDisplay\nTime: $createdAt';
+
         return ListTile(
           dense: true,
           leading: _actionIcon(action),
           title: Text('$action • $resourceType'),
-          subtitle: Text('Actor: $actorDisplay\nTime: $createdAt'),
-          trailing: resourceId.isNotEmpty
-              ? Text(resourceId, style: const TextStyle(fontSize: 12))
-              : null,
+          subtitle: Text(
+            subtitleText,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: null,
+          isThreeLine: hasDoc,
         );
       },
     );

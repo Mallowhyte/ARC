@@ -9,6 +9,7 @@ from datetime import datetime
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
 import requests
+import urllib.parse
 
 
 class SupabaseClient:
@@ -430,6 +431,88 @@ class SupabaseClient:
             return data
         except Exception as e:
             print(f"Auth admin get user failed: {e}")
+            return None
+
+    def _auth_admin_find_user_by_email(self, email: str) -> Optional[Dict]:
+        """Find a user by exact email using the Auth Admin REST API.
+
+        Some Supabase deployments ignore the email filter and return a page of users.
+        To be safe, we filter for an exact, case-insensitive email match and, if not
+        found, we paginate through a few pages.
+        """
+        try:
+            base_url = f"{self.supabase_url}/auth/v1/admin/users"
+            headers = {
+                'apiKey': self.supabase_key,
+                'Authorization': f"Bearer {self.supabase_key}",
+            }
+
+            def pick_match(payload) -> Optional[Dict]:
+                target = (email or '').strip().lower()
+                if not target:
+                    return None
+                if isinstance(payload, list):
+                    for u in payload:
+                        if isinstance(u, dict) and (u.get('email') or '').strip().lower() == target:
+                            return u
+                    return None
+                if isinstance(payload, dict):
+                    if 'users' in payload and isinstance(payload.get('users'), list):
+                        return pick_match(payload.get('users'))
+                    if (payload.get('email') or '').strip().lower() == target:
+                        return payload
+                return None
+
+            # Attempt direct query by email param
+            try:
+                resp = requests.get(base_url, headers=headers, params={'email': email}, timeout=10)
+                if resp.status_code == 200:
+                    match = pick_match(resp.json())
+                    if match:
+                        return match
+            except Exception:
+                pass
+
+            # Fallback: paginate and search
+            for page in range(1, 6):  # scan up to ~1000 users at 200/page
+                try:
+                    resp2 = requests.get(base_url, headers=headers, params={'per_page': 200, 'page': page}, timeout=10)
+                    if resp2.status_code != 200:
+                        break
+                    data2 = resp2.json()
+                    match = pick_match(data2)
+                    if match:
+                        return match
+                    # Stop if fewer than a page returned (end of list)
+                    if isinstance(data2, list) and len(data2) < 200:
+                        break
+                    if isinstance(data2, dict) and isinstance(data2.get('users'), list) and len(data2.get('users')) < 200:
+                        break
+                except Exception:
+                    break
+            return None
+        except Exception as e:
+            print(f"Auth admin find user by email failed: {e}")
+            return None
+
+    def find_user_by_email(self, email: str) -> Optional[Dict]:
+        try:
+            try:
+                res = self.client.table('users').select('id, full_name, email').eq('email', email).maybe_single().execute()
+                if isinstance(res.data, dict) and res.data.get('id'):
+                    return {'id': res.data.get('id'), 'email': res.data.get('email'), 'full_name': res.data.get('full_name')}
+            except Exception:
+                pass
+            data = self._auth_admin_find_user_by_email(email)
+            if not data:
+                return None
+            meta = data.get('user_metadata') or data.get('raw_user_meta_data') or {}
+            full_name = None
+            if isinstance(meta, dict):
+                full_name = meta.get('full_name') or meta.get('name')
+            return {'id': data.get('id'), 'email': data.get('email'), 'full_name': full_name}
+        except Exception as e:
+            print(f"find_user_by_email failed: {e}")
             return None
 
     def get_user_displays(self, ids: List[str]) -> Dict[str, Dict[str, Optional[str]]]:

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/auth_service.dart';
+import '../../services/api_service.dart';
 
 class RoleManagementScreen extends StatefulWidget {
   const RoleManagementScreen({super.key});
@@ -12,6 +13,7 @@ class RoleManagementScreen extends StatefulWidget {
 class _RoleManagementScreenState extends State<RoleManagementScreen> {
   final _supabase = Supabase.instance.client;
   final _auth = AuthService();
+  final _api = ApiService();
 
   bool _loading = true;
   String? _error;
@@ -76,6 +78,10 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
         .select('id,user_id,role,department_id,created_at')
         .order('created_at');
     _roles = (data as List).cast<Map<String, dynamic>>();
+    // Filter out rows with empty/missing user_id to avoid blank bullets
+    _roles = _roles
+        .where((r) => ((r['user_id'] ?? '').toString()).trim().isNotEmpty)
+        .toList();
   }
 
   Future<void> _loadDepartments() async {
@@ -95,18 +101,20 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
 
   Future<void> _loadUserProfilesForRoles() async {
     try {
-      final ids = _roles.map((r) => r['user_id'] as String).toSet().toList();
+      final ids = _roles
+          .map((r) => (r['user_id'] ?? '').toString())
+          .where((s) => s.isNotEmpty)
+          .toSet()
+          .toList();
       if (ids.isEmpty) return;
-      final profiles = await _supabase
-          .from('users')
-          .select('id, email, full_name')
-          .inFilter('id', ids);
-      for (final row in (profiles as List<dynamic>)) {
-        final map = row as Map<String, dynamic>;
-        _userProfiles[map['id'] as String] = map;
-      }
+      final mapping = await _api.getUserDisplays(ids);
+      mapping.forEach((key, value) {
+        if (value is Map) {
+          _userProfiles[key] = Map<String, dynamic>.from(value);
+        }
+      });
     } catch (_) {
-      // users table might not exist or be readable; fallback to showing user_id only
+      // Fallback to showing user_id only
     }
   }
 
@@ -128,18 +136,12 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
         return;
       }
 
-      // Resolve email to user id via profiles table if possible
+      // Resolve email to user id via backend (service role)
       if (userId == null && email.isNotEmpty) {
-        try {
-          final row = await _supabase
-              .from('users')
-              .select('id, email')
-              .eq('email', email)
-              .maybeSingle();
-          if (row is Map<String, dynamic>) {
-            userId = row['id'] as String;
-          }
-        } catch (_) {}
+        final resolved = await _api.resolveUserByEmail(email);
+        if (resolved != null && (resolved['id'] as String?) != null) {
+          userId = resolved['id'] as String;
+        }
       }
 
       if (userId == null) {
@@ -352,9 +354,17 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
                       final dept = r['department_id'] as String?;
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: Text(label),
+                        title: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         subtitle: dept != null
-                            ? Text('Department: ${_deptLabel(dept) ?? dept}')
+                            ? Text(
+                                'Department: ${_deptLabel(dept) ?? dept}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              )
                             : null,
                         trailing: IconButton(
                           icon: const Icon(
@@ -364,6 +374,7 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
                           onPressed: () => _deleteRole(r['id'] as String),
                           tooltip: 'Remove role',
                         ),
+                        isThreeLine: false,
                       );
                     }),
                   ],

@@ -83,6 +83,24 @@ class ApiService {
     }
   }
 
+  /// Resolve a user by email to id/full_name/email via backend
+  Future<Map<String, dynamic>?> resolveUserByEmail(String email) async {
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/api/users/resolve?email=${Uri.encodeQueryComponent(email)}',
+      );
+      final resp = await http.get(uri);
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body) as Map<String, dynamic>;
+        return Map<String, dynamic>.from(data['user'] as Map);
+      }
+      if (resp.statusCode == 404) return null;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Get a signed download URL for a document
   Future<String> getDownloadUrl({
     required String documentId,

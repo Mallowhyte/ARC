@@ -489,6 +489,24 @@ def users_display():
         return jsonify({'error': 'Failed to resolve user displays', 'details': str(e)}), 500
 
 
+@app.route('/api/users/resolve', methods=['GET'])
+def resolve_user_by_email():
+    """Resolve a user by email to return their id, email, and full_name.
+
+    Example: /api/users/resolve?email=user@example.com
+    """
+    try:
+        email = request.args.get('email', '').strip()
+        if not email:
+            return jsonify({'error': 'email is required'}), 400
+        user = supabase_client.find_user_by_email(email)
+        if not user or not user.get('id'):
+            return jsonify({'error': 'User not found'}), 404
+        return jsonify({'success': True, 'user': user}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to resolve user by email', 'details': str(e)}), 500
+
+
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     host = os.getenv('HOST', '0.0.0.0')
