@@ -188,6 +188,41 @@ class SupabaseClient:
         best['dpm_folder'] = self._slug(best.get('dpm_number'))
         return best
     
+    def reclassify_dpm(self, limit: int = 100, threshold: float = 0.2, only_missing: bool = True) -> Dict[str, int]:
+        stats: Dict[str, int] = {'scanned': 0, 'updated': 0, 'skipped': 0}
+        try:
+            # Fetch documents similarly to get_statistics, then apply limit in Python
+            res = self.client.table('documents').select('id, extracted_text, dpm_number').execute()
+            rows = (res.data or [])[: max(0, limit)]
+            for row in rows:
+                stats['scanned'] += 1
+                if only_missing and row.get('dpm_number'):
+                    stats['skipped'] += 1
+                    continue
+                text = row.get('extracted_text') or ''
+                if not text.strip():
+                    stats['skipped'] += 1
+                    continue
+                dpm = self.detect_dpm(text)
+                dpm_number = dpm.get('dpm_number') if isinstance(dpm, dict) else None
+                dpm_item_id = dpm.get('dpm_item_id') if isinstance(dpm, dict) else None
+                conf = dpm.get('confidence') if isinstance(dpm, dict) else None
+                if not dpm_item_id or not isinstance(conf, (int, float)) or float(conf) < threshold:
+                    stats['skipped'] += 1
+                    continue
+                self.update_document(
+                    row.get('id'),
+                    {
+                        'dpm_number': dpm_number,
+                        'dpm_item_id': dpm_item_id,
+                        'dpm_confidence': conf,
+                    },
+                )
+                stats['updated'] += 1
+        except Exception as e:
+            print(f"Error during DPM reclassification: {str(e)}")
+        return stats
+    
     def save_document_record(self, record: Dict) -> Dict:
         """
         Save document metadata to database

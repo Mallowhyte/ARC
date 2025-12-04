@@ -403,7 +403,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 ),
                 ..._documents
                     .map((d) => d.dpmNumber)
-                    .where((s) => s != null && s!.isNotEmpty)
+                    .where((s) => s != null && s.isNotEmpty)
                     .toSet()
                     .toList()
                     .cast<String?>()

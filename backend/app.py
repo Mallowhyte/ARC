@@ -493,6 +493,20 @@ def get_statistics():
         }), 500
 
 
+@app.route('/api/dpm/reclassify', methods=['POST'])
+def dpm_reclassify():
+    try:
+        limit_param = request.args.get('limit')
+        try:
+            limit = int(limit_param) if limit_param else 100
+        except ValueError:
+            return jsonify({'error': 'limit must be an integer'}), 400
+        result = supabase_client.reclassify_dpm(limit=limit, threshold=0.2, only_missing=True)
+        return jsonify({'success': True, 'result': result}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to reclassify DPM', 'details': str(e)}), 500
+
+
 @app.route('/api/users/display', methods=['GET'])
 def users_display():
     """Return display info (full_name, email) for comma-separated ids query param.
