@@ -50,6 +50,31 @@ alter table if exists public.documents
   add column if not exists department_id uuid references public.departments(id),
   add column if not exists storage_key text;
 
+-- 2a) DPM schema
+create table if not exists public.dpm_items (
+  id uuid primary key default gen_random_uuid(),
+  dpm_number text unique not null,         -- e.g., 'DPM-1.1'
+  title text,
+  description text,
+  evidence_requirements jsonb,             -- optional JSON payload
+  created_at timestamptz default now()
+);
+
+create table if not exists public.dpm_rules (
+  id uuid primary key default gen_random_uuid(),
+  dpm_item_id uuid not null references public.dpm_items(id) on delete cascade,
+  pattern text not null,
+  weight numeric default 1,
+  created_at timestamptz default now(),
+  unique(dpm_item_id, pattern)
+);
+
+-- Documents: DPM classification columns
+alter table if exists public.documents
+  add column if not exists dpm_number text,
+  add column if not exists dpm_item_id uuid references public.dpm_items(id) on delete set null,
+  add column if not exists dpm_confidence numeric;
+
 -- Backfill existing rows
 update public.documents
 set owner_id = user_id::uuid
@@ -60,6 +85,8 @@ where owner_id is null
 create index if not exists idx_documents_owner on public.documents(owner_id);
 create index if not exists idx_documents_department on public.documents(department_id);
 create index if not exists idx_user_roles_user on public.user_roles(user_id);
+create index if not exists idx_documents_dpm on public.documents(dpm_number);
+create index if not exists idx_documents_dpm_item on public.documents(dpm_item_id);
 
 -- 3a) RLS on user_roles
 alter table public.user_roles enable row level security;

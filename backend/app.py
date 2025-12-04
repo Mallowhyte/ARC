@@ -160,13 +160,31 @@ def classify_document():
         except Exception as fe_err:
             print(f"Field extraction error: {str(fe_err)}")
         
-        # Step 3: Upload file to Supabase Storage
+        # Step 3: Detect DPM and Upload file to Supabase Storage
+        dpm = {}
+        try:
+            dpm = supabase_client.detect_dpm(extracted_text)
+        except Exception as _:
+            dpm = {}
+        dpm_number = dpm.get('dpm_number') if isinstance(dpm, dict) else None
+        dpm_item_id = dpm.get('dpm_item_id') if isinstance(dpm, dict) else None
+        dpm_confidence = dpm.get('confidence') if isinstance(dpm, dict) else None
+        dpm_folder = dpm.get('dpm_folder') if isinstance(dpm, dict) else None
+        # Apply threshold: if low confidence or no match, route to uncategorized and do not set dpm fields
+        # Use 0.2 to allow a single strong evidence to classify when the rule set is comprehensive
+        if not dpm_item_id or not isinstance(dpm_confidence, (int, float)) or float(dpm_confidence) < 0.2:
+            dpm_number = None
+            dpm_item_id = None
+            dpm_confidence = None
+            dpm_folder = None
+
         print(f"Uploading to Supabase storage...")
         storage_url, storage_key = supabase_client.upload_file(
             temp_path,
             filename,
             user_id,
             dept_code,
+            dpm_folder,
         )
         print(f"File uploaded successfully")
         
@@ -182,6 +200,9 @@ def classify_document():
             'storage_url': storage_url,
             'status': 'classified',
             'storage_key': storage_key,
+            'dpm_number': dpm_number,
+            'dpm_item_id': dpm_item_id,
+            'dpm_confidence': dpm_confidence,
         }
         
         db_result = supabase_client.save_document_record(record)

@@ -5,6 +5,7 @@ Handles database operations and file storage with Supabase
 
 import os
 import mimetypes
+import re
 from datetime import datetime
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
@@ -55,7 +56,7 @@ class SupabaseClient:
                     print(f"⚠ Warning: Could not verify bucket: {error_msg}")
                     print(f"  Continuing anyway - bucket may already exist")
     
-    def upload_file(self, file_path: str, filename: str, user_id: str, department_code: Optional[str] = None) -> Tuple[str, str]:
+    def upload_file(self, file_path: str, filename: str, user_id: str, department_code: Optional[str] = None, dpm_folder: Optional[str] = None) -> Tuple[str, str]:
         try:
             mime_type, _ = mimetypes.guess_type(file_path)
             if mime_type is None:
@@ -67,7 +68,9 @@ class SupabaseClient:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             unique_filename = f"{timestamp}_{filename}"
             folder_prefix = (department_code or 'misc').strip()
-            storage_key = f"{folder_prefix}/{user_id}/{unique_filename}"
+            dpm_segment = (dpm_folder or 'uncategorized').strip()
+            # Keep user_id as second segment for storage RLS policy compatibility
+            storage_key = f"{folder_prefix}/{user_id}/{dpm_segment}/{unique_filename}"
 
             self.client.storage.from_(self.bucket_name).upload(
                 storage_key,
@@ -92,6 +95,98 @@ class SupabaseClient:
         except Exception as e:
             print(f"❌ Error uploading file: {str(e)}")
             raise
+
+    # ---------------- DPM utilities -----------------
+    def _slug(self, value: Optional[str]) -> str:
+        if not value:
+            return 'uncategorized'
+        s = re.sub(r"\s+", "-", str(value).strip())
+        s = re.sub(r"[^A-Za-z0-9_.\-]", "-", s)
+        s = re.sub(r"-+", "-", s)
+        return s.strip('-').lower() or 'uncategorized'
+
+    def get_dpm_catalog(self) -> List[Dict]:
+        """Fetch DPM items and their rules.
+        Returns a list of dicts {id, dpm_number, title, description, rules:[{pattern, weight}]}
+        """
+        catalog: List[Dict] = []
+        try:
+            items = self.client.table('dpm_items').select('id, dpm_number, title, description').execute().data or []
+            rules = self.client.table('dpm_rules').select('dpm_item_id, pattern, weight').execute().data or []
+            rules_by = {}
+            for r in rules:
+                rules_by.setdefault(r.get('dpm_item_id'), []).append({'pattern': r.get('pattern'), 'weight': float(r.get('weight') or 1)})
+            for it in items:
+                catalog.append({
+                    'id': it.get('id'),
+                    'dpm_number': it.get('dpm_number'),
+                    'title': it.get('title'),
+                    'description': it.get('description'),
+                    'rules': rules_by.get(it.get('id'), [])
+                })
+        except Exception as e:
+            print(f"Error fetching DPM catalog: {e}")
+        return catalog
+
+    def detect_dpm(self, text: Optional[str]) -> Dict:
+        """Detect best DPM item based on simple keyword/regex rules.
+        Pattern syntax: treat as case-insensitive substring; if it starts with 're:' use regex after that prefix.
+        Returns dict with keys: dpm_number, dpm_item_id, confidence, matched_patterns.
+        """
+        if not text or not text.strip():
+            return {'dpm_number': None, 'dpm_item_id': None, 'confidence': 0.0, 'matched_patterns': []}
+        txt = text.lower()
+        best = None
+        catalog = self.get_dpm_catalog()
+        for item in catalog:
+            rules = item.get('rules') or []
+            if not rules:
+                continue
+            total_w = sum(float(r.get('weight') or 1) for r in rules)
+            match_w = 0.0
+            matched = []
+            for r in rules:
+                pat = (r.get('pattern') or '').strip()
+                w = float(r.get('weight') or 1)
+                ok = False
+                try:
+                    if pat.lower().startswith('re:'):
+                        rx = pat[3:]
+                        # Normalize common DB-stored escapes (e.g., "\\b" -> "\b")
+                        try:
+                            rx = rx.replace('\\\\', '\\')
+                        except Exception:
+                            pass
+                        try:
+                            if re.search(rx, text, flags=re.IGNORECASE):
+                                ok = True
+                        except re.error:
+                            # If the pattern is not a valid regex, degrade to substring match
+                            if rx and rx.lower() in txt:
+                                ok = True
+                    else:
+                        if pat and pat.lower() in txt:
+                            ok = True
+                except Exception:
+                    ok = False
+                if ok:
+                    match_w += w
+                    matched.append(pat)
+            if total_w > 0:
+                conf = max(0.0, min(1.0, match_w / total_w))
+            else:
+                conf = 0.0
+            if best is None or conf > best['confidence']:
+                best = {
+                    'dpm_number': item.get('dpm_number'),
+                    'dpm_item_id': item.get('id'),
+                    'confidence': conf,
+                    'matched_patterns': matched,
+                }
+        if not best:
+            return {'dpm_number': None, 'dpm_item_id': None, 'confidence': 0.0, 'matched_patterns': []}
+        best['dpm_folder'] = self._slug(best.get('dpm_number'))
+        return best
     
     def save_document_record(self, record: Dict) -> Dict:
         """

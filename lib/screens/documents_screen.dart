@@ -28,6 +28,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   String _filterType = 'All';
+  String _filterDpm = 'All';
   String _searchQuery = '';
   Set<String> _roles = {};
   final Map<String, Map<String, dynamic>> _userDisplayCache = {};
@@ -220,12 +221,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       docs = docs.where((doc) => doc.documentType == _filterType);
     }
 
+    if (_filterDpm != 'All') {
+      docs = docs.where((doc) => (doc.dpmNumber ?? '') == _filterDpm);
+    }
+
     if (_searchQuery.isNotEmpty) {
       final query = _searchQuery.toLowerCase();
       docs = docs.where(
         (doc) =>
             doc.filename.toLowerCase().contains(query) ||
-            doc.documentType.toLowerCase().contains(query),
+            doc.documentType.toLowerCase().contains(query) ||
+            (doc.dpmNumber ?? '').toLowerCase().contains(query),
       );
     }
 
@@ -379,6 +385,46 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     },
                   );
                 }).toList(),
+                const Divider(),
+                const Text(
+                  'Filter by DPM',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  title: const Text('All'),
+                  trailing: _filterDpm == 'All'
+                      ? const Icon(Icons.check, color: Colors.blue)
+                      : null,
+                  onTap: () {
+                    setState(() => _filterDpm = 'All');
+                    Navigator.pop(context);
+                  },
+                ),
+                ..._documents
+                    .map((d) => d.dpmNumber)
+                    .where((s) => s != null && s!.isNotEmpty)
+                    .toSet()
+                    .toList()
+                    .cast<String?>()
+                    .map((num) {
+                      final n = num!;
+                      final count = _documents
+                          .where((d) => d.dpmNumber == n)
+                          .length;
+                      return ListTile(
+                        title: Text(n),
+                        subtitle: Text('$count documents'),
+                        trailing: _filterDpm == n
+                            ? const Icon(Icons.check, color: Colors.blue)
+                            : null,
+                        onTap: () {
+                          setState(() => _filterDpm = n);
+                          Navigator.pop(context);
+                        },
+                      );
+                    })
+                    .toList(),
               ],
             ),
           ),
@@ -562,6 +608,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   label: 'Confidence',
                   value: doc.confidencePercentage,
                 ),
+                if (doc.dpmNumber != null)
+                  _DetailRow(label: 'DPM', value: doc.dpmNumber!),
+                if (doc.dpmConfidence != null)
+                  _DetailRow(
+                    label: 'DPM Confidence',
+                    value:
+                        '${(((doc.dpmConfidence ?? 0) * 100)).toStringAsFixed(0)}%',
+                  ),
                 _DetailRow(
                   label: 'Upload Date',
                   value: DateFormat(

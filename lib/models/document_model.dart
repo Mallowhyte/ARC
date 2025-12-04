@@ -14,6 +14,10 @@ class DocumentModel {
   final DateTime? updatedAt;
   final List<String>? keywords;
 
+  final String? dpmNumber;
+  final double? dpmConfidence;
+  final String? storageKey;
+
   // ISO Document Management Fields
   final String? documentNumber;
   final int? versionNumber;
@@ -36,6 +40,9 @@ class DocumentModel {
     required this.createdAt,
     this.updatedAt,
     this.keywords,
+    this.dpmNumber,
+    this.dpmConfidence,
+    this.storageKey,
     this.documentNumber,
     this.versionNumber,
     this.department,
@@ -68,6 +75,11 @@ class DocumentModel {
       keywords: json['keywords'] != null
           ? List<String>.from(json['keywords'])
           : null,
+      dpmNumber: json['dpm_number'],
+      dpmConfidence: (json['dpm_confidence'] is int)
+          ? (json['dpm_confidence'] as int).toDouble()
+          : json['dpm_confidence']?.toDouble(),
+      storageKey: json['storage_key'],
       documentNumber: json['document_number'],
       versionNumber: json['version_number'] is int
           ? json['version_number']
@@ -105,6 +117,9 @@ class DocumentModel {
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
       'keywords': keywords,
+      'dpm_number': dpmNumber,
+      'dpm_confidence': dpmConfidence,
+      'storage_key': storageKey,
       'document_number': documentNumber,
       'version_number': versionNumber,
       'department': department,
