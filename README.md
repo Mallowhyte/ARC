@@ -1,4 +1,4 @@
-# ARC – AI-based Record Classifier
+# ARC – Automated Record Classifier
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/arc)
 [![Flutter](https://img.shields.io/badge/Flutter-3.5%2B-blue.svg)](https://flutter.dev/)
@@ -7,7 +7,7 @@
 
 > 🎓 **An intelligent document management system that automatically classifies and organizes academic and administrative documents using OCR and machine learning.**
 
-ARC (AI-based Record Classifier) is a full-stack mobile application designed for school administrators, faculty staff, and registrar offices. It eliminates manual document sorting by automatically extracting text from uploaded files and classifying them into predefined categories such as **Exam Forms**, **Grade Sheets**, **Receipts**, **Clearances**, and more.
+ARC (Automated Record Classifier) is a full-stack mobile application designed for school administrators, faculty staff, and registrar offices. It eliminates manual document sorting by automatically extracting text from uploaded files and classifying them into predefined categories such as **Exam Forms**, **Grade Sheets**, **Receipts**, **Clearances**, and more.
 
 **✨ Key Benefits:**
 - ⚡ **Fast Processing** - Documents classified in seconds

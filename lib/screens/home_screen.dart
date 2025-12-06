@@ -213,7 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ARC - AI Record Classifier'),
+        title: const Text('ARC - Automated Record Classifier'),
         actions: [
           if (_roles.isNotEmpty)
             Padding(
@@ -373,7 +373,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       children: [
         const Text(
-          'AI-based Record Classifier\n\n'
+          'Automated Record Classifier\n\n'
           'Automatically classifies and organizes school documents using '
           'machine learning and OCR technology.',
         ),

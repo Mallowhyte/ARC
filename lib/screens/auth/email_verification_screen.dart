@@ -9,22 +9,21 @@ import '../home_screen.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
   final String email;
-  
-  const EmailVerificationScreen({
-    super.key,
-    required this.email,
-  });
+
+  const EmailVerificationScreen({super.key, required this.email});
 
   @override
-  State<EmailVerificationScreen> createState() => _EmailVerificationScreenState();
+  State<EmailVerificationScreen> createState() =>
+      _EmailVerificationScreenState();
 }
 
 class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
-  final List<TextEditingController> _pinControllers = 
-      List.generate(6, (index) => TextEditingController());
-  final List<FocusNode> _focusNodes = 
-      List.generate(6, (index) => FocusNode());
-  
+  final List<TextEditingController> _pinControllers = List.generate(
+    6,
+    (index) => TextEditingController(),
+  );
+  final List<FocusNode> _focusNodes = List.generate(6, (index) => FocusNode());
+
   final _authService = AuthService();
   bool _isVerifying = false;
   bool _isResending = false;
@@ -99,12 +98,16 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           );
         }
       } else if (mounted) {
-        setState(() => _errorMessage = 'Invalid verification code. Please try again.');
+        setState(
+          () => _errorMessage = 'Invalid verification code. Please try again.',
+        );
         _clearPin();
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _errorMessage = 'Verification failed. Please try again.');
+        setState(
+          () => _errorMessage = 'Verification failed. Please try again.',
+        );
         _clearPin();
       }
     } finally {
@@ -121,7 +124,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
     try {
       await _authService.resendVerificationEmail(widget.email);
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -170,9 +173,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Verify Email'),
-      ),
+      appBar: AppBar(title: const Text('Verify Email')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
@@ -200,8 +201,8 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
               Text(
                 'Check Your Email',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
@@ -210,9 +211,9 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
               RichText(
                 textAlign: TextAlign.center,
                 text: TextSpan(
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Colors.grey[600],
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
                   children: [
                     const TextSpan(
                       text: 'We sent a 6-digit verification code to\n',
@@ -258,9 +259,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                           ),
                         ),
                       ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       onChanged: (value) => _onPinChanged(index, value),
                       onTap: () {
                         // Clear error when user starts typing
@@ -285,7 +284,11 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.error_outline, color: Colors.red[700], size: 20),
+                      Icon(
+                        Icons.error_outline,
+                        color: Colors.red[700],
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -313,10 +316,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text(
-                        'Verify Code',
-                        style: TextStyle(fontSize: 16),
-                      ),
+                    : const Text('Verify Code', style: TextStyle(fontSize: 16)),
               ),
               const SizedBox(height: 24),
 
@@ -364,7 +364,11 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                          Icon(
+                            Icons.info_outline,
+                            color: Colors.blue[700],
+                            size: 20,
+                          ),
                           const SizedBox(width: 8),
                           const Text(
                             'Tips',
@@ -379,7 +383,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                       Text(
                         '• Check your spam/junk folder\n'
                         '• The code expires in 10 minutes\n'
-                        '• Sent from: ARC (AI-based Record Classifier)',
+                        '• Sent from: ARC (Automated Record Classifier)',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey[700],

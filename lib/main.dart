@@ -22,7 +22,7 @@ class ARCApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ARC - AI Record Classifier',
+      title: 'ARC - Automated Record Classifier',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,

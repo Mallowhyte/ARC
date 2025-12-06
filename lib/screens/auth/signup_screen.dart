@@ -134,7 +134,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Sign up to get started with ARC',
+                  'Sign up to get started with ARC (Automated Record Classifier)',
                   style: Theme.of(
                     context,
                   ).textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),

@@ -39,12 +39,14 @@ class ApiService {
 
       print('🚀 Sending request...');
 
-      // Send request with timeout (180 seconds for OCR processing)
+      // Send request with extended timeout for OCR/classification
       var streamedResponse = await request.send().timeout(
-        const Duration(seconds: 180),
+        const Duration(minutes: 5),
         onTimeout: () {
-          print('⏱️ Request timed out after 180 seconds');
-          throw Exception('Upload timed out. Please wait longer or try again.');
+          print('⏱️ Request timed out after 5 minutes');
+          throw Exception(
+            'Upload timed out after 5 minutes. The server may still finish processing; please check your documents list or try again.',
+          );
         },
       );
 

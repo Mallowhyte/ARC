@@ -242,7 +242,16 @@ class OCREngine:
                 body_text = ""
 
             pieces = [p for p in [header_text, best_text, body_text] if p]
-            return ("\n\n".join(pieces)).strip()
+            text = ("\n\n".join(pieces)).strip()
+            # Limit how much text we keep to the most relevant portion for classification
+            try:
+                max_chars_env = os.getenv('OCR_MAX_CHARS')
+                max_chars = int(max_chars_env) if max_chars_env else 1500
+            except Exception:
+                max_chars = 1500
+            if len(text) > max_chars:
+                text = text[:max_chars]
+            return text
             
         except Exception as e:
             print(f"Error extracting text from image: {str(e)}")
@@ -256,9 +265,18 @@ class OCREngine:
             
             extracted_text = []
             
-            # Process each page
-            for i, page in enumerate(pages):
-                print(f"Processing page {i+1}/{len(pages)}")
+            # Only process the first N pages (header pages usually contain all signals we need)
+            try:
+                max_pages_env = os.getenv('OCR_MAX_PAGES')
+                max_pages = int(max_pages_env) if max_pages_env else 1
+            except Exception:
+                max_pages = 1
+
+            pages_to_process = pages[: max(1, max_pages)]
+
+            # Process each selected page
+            for i, page in enumerate(pages_to_process):
+                print(f"Processing page {i+1}/{len(pages_to_process)}")
                 
                 # Convert PIL Image to numpy array for preprocessing
                 img_array = np.array(page)
@@ -278,8 +296,18 @@ class OCREngine:
                 os.remove(temp_path)
             
             # Combine text from all pages
-            full_text = "\n\n".join(extracted_text)
-            return full_text.strip()
+            full_text = "\n\n".join(extracted_text).strip()
+
+            # Apply the same length cap used for single images
+            try:
+                max_chars_env = os.getenv('OCR_MAX_CHARS')
+                max_chars = int(max_chars_env) if max_chars_env else 1500
+            except Exception:
+                max_chars = 1500
+            if len(full_text) > max_chars:
+                full_text = full_text[:max_chars]
+
+            return full_text
             
         except Exception as e:
             print(f"Error extracting text from PDF: {str(e)}")

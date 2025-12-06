@@ -25,7 +25,10 @@ cross join (
     ('re:\bsrf\b', 1.0),                            -- acronym SRF
     ('syllabus review', 0.6),                            -- generic phrase
     ('course syllabus', 0.5),                            -- common header
-    ('syllabus', 0.4)                                    -- fallback keyword
+    ('syllabus', 0.4),                                   -- fallback keyword
+    ('FM-USTP-ACAD-01', 1.5),                            -- specific form codes
+    ('FM-USTP-ACAD-02', 1.5),
+    ('FM-USTP-ACAD-12', 1.5)
 ) as v(pattern, weight)
 on conflict (dpm_item_id, pattern) do update set weight = excluded.weight;
 

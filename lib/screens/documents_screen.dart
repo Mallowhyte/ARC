@@ -32,6 +32,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String _searchQuery = '';
   Set<String> _roles = {};
   final Map<String, Map<String, dynamic>> _userDisplayCache = {};
+  String _viewMode = 'list'; // 'list' or 'folders'
 
   @override
   void initState() {
@@ -313,6 +314,34 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 ),
               ),
 
+            // View mode toggle
+            if (_documents.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('List'),
+                      selected: _viewMode == 'list',
+                      onSelected: (selected) {
+                        if (!selected) return;
+                        setState(() => _viewMode = 'list');
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('Folders'),
+                      selected: _viewMode == 'folders',
+                      onSelected: (selected) {
+                        if (!selected) return;
+                        setState(() => _viewMode = 'folders');
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
             // Content
             Expanded(child: _buildContent()),
           ],
@@ -498,6 +527,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       );
     }
 
+    if (_viewMode == 'folders') {
+      return _buildFolderContent(filteredDocs);
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.all(16.0),
       itemCount: filteredDocs.length,
@@ -515,6 +548,70 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           onDelete: () => _deleteDoc(doc),
           onDownload: () => _downloadDoc(doc),
           onOpen: () => _openDetails(doc),
+        );
+      },
+    );
+  }
+
+  Widget _buildFolderContent(List<DocumentModel> docs) {
+    final Map<String, List<DocumentModel>> byDpm = {};
+    for (final doc in docs) {
+      final key = doc.dpmNumber ?? 'Uncategorized';
+      byDpm.putIfAbsent(key, () => []).add(doc);
+    }
+
+    final entries = byDpm.entries.toList()
+      ..sort((a, b) {
+        if (a.key == 'Uncategorized') return 1;
+        if (b.key == 'Uncategorized') return -1;
+        return a.key.compareTo(b.key);
+      });
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16.0),
+      itemCount: entries.length,
+      itemBuilder: (context, index) {
+        final entry = entries[index];
+        final dpm = entry.key;
+        final items = entry.value;
+        final count = items.length;
+        final isUncategorized = dpm == 'Uncategorized';
+        final title = isUncategorized ? 'Uncategorized' : dpm;
+        final subtitle = isUncategorized
+            ? 'Documents without DPM classification'
+            : '$count document${count == 1 ? '' : 's'}';
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12.0),
+          child: ExpansionTile(
+            leading: Icon(
+              Icons.folder,
+              color: isUncategorized ? Colors.grey : Colors.amber[700],
+            ),
+            title: Text(title),
+            subtitle: Text(subtitle),
+            children: items.map((doc) {
+              final isAdmin = _roles.contains('admin');
+              final isAuditor = _roles.contains('auditor');
+              final isOwner = doc.userId == _userId;
+              final canDelete = isAdmin || (!isAuditor && isOwner);
+              final canDownload = isAdmin || isAuditor || isOwner;
+              return Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8.0,
+                  vertical: 4.0,
+                ),
+                child: _DocumentCard(
+                  document: doc,
+                  canDelete: canDelete,
+                  canDownload: canDownload,
+                  onDelete: () => _deleteDoc(doc),
+                  onDownload: () => _downloadDoc(doc),
+                  onOpen: () => _openDetails(doc),
+                ),
+              );
+            }).toList(),
+          ),
         );
       },
     );
